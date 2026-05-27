@@ -1,19 +1,22 @@
 import os
 import json
-from flask import Flask, request
+from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 from datetime import datetime
 import threading
-import asyncio
 
 # ---------- CONFIG ----------
 ADMIN_BOT_TOKEN = os.environ.get("ADMIN_BOT_TOKEN")
 USER_BOT_TOKEN = os.environ.get("USER_BOT_TOKEN")
 ADMIN_USER_ID = os.environ.get("ADMIN_USER_ID")
 
+print(f"ADMIN_BOT_TOKEN: {ADMIN_BOT_TOKEN[:15] if ADMIN_BOT_TOKEN else 'NOT SET'}...")
+print(f"USER_BOT_TOKEN: {USER_BOT_TOKEN[:15] if USER_BOT_TOKEN else 'NOT SET'}...")
+print(f"ADMIN_USER_ID: {ADMIN_USER_ID}")
+
 if not ADMIN_BOT_TOKEN or not USER_BOT_TOKEN or not ADMIN_USER_ID:
-    print("ERROR: Set ADMIN_BOT_TOKEN, USER_BOT_TOKEN, ADMIN_USER_ID in Render")
+    print("ERROR: Environment variables not set properly!")
     exit(1)
 
 USERS_FILE = "users.json"
@@ -45,6 +48,7 @@ def save_sessions(sessions):
         json.dump(sessions, f, indent=4)
 
 # ============= ADMIN BOT =============
+print("Creating admin bot...")
 admin_app = Application.builder().token(ADMIN_BOT_TOKEN).build()
 
 async def admin_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -77,7 +81,7 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             msg = "Registered Users:\n\n"
             for uid, info in users.items():
                 msg += f"ID: {uid}\nAdded: {info['added_on']}\n\n"
-            await query.message.reply_text(msg)
+            await query.message.reply_text(msg[:4000])
             
     elif data == "remove_user":
         if not users:
@@ -94,10 +98,11 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             msg = "Active Sessions:\n\n"
             for tg_id, unique_id in sessions.items():
                 msg += f"User: {tg_id} -> Logged in as: {unique_id}\n"
-            await query.message.reply_text(msg)
+            await query.message.reply_text(msg[:4000])
             
     elif data.startswith("remove_"):
         user_to_remove = data.replace("remove_", "")
+        users = load_users()
         if user_to_remove in users:
             del users[user_to_remove]
             save_users(users)
@@ -122,16 +127,17 @@ admin_app.add_handler(CallbackQueryHandler(admin_callback))
 admin_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, admin_message))
 
 # ============= USER BOT =============
+print("Creating user bot...")
 user_app = Application.builder().token(USER_BOT_TOKEN).build()
 
 async def user_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Telegram Auto Message System\n\n"
+        "🤖 Telegram Auto Message System\n\n"
         "Commands (bina slash):\n"
-        "login YOUR_ID - Login to your account\n"
+        "login YOUR_ID - Login\n"
         "logout - Logout\n"
-        "broadcast GROUP_ID1,GROUP_ID2 Your message - Send to multiple groups\n"
-        "myid - Check login status\n\n"
+        "broadcast GROUP_ID1,GROUP_ID2 Your message - Send to groups\n"
+        "myid - Check status\n\n"
         "Example:\n"
         "broadcast -100123456789,-100987654321 Hello!"
     )
@@ -151,9 +157,9 @@ async def user_login(update: Update, context: ContextTypes.DEFAULT_TYPE):
         sessions = load_sessions()
         sessions[user_tg_id] = unique_id
         save_sessions(sessions)
-        await update.message.reply_text(f"Login successful! Welcome {unique_id}")
+        await update.message.reply_text(f"✅ Login successful! Welcome {unique_id}")
     else:
-        await update.message.reply_text("Invalid ID! Contact admin.")
+        await update.message.reply_text("❌ Invalid ID! Contact admin.")
 
 async def user_logout(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_tg_id = str(update.effective_user.id)
@@ -162,7 +168,7 @@ async def user_logout(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_tg_id in sessions:
         del sessions[user_tg_id]
         save_sessions(sessions)
-        await update.message.reply_text("Logged out!")
+        await update.message.reply_text("✅ Logged out!")
 
 async def user_myid(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_tg_id = str(update.effective_user.id)
@@ -200,13 +206,14 @@ async def user_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
             try:
                 await context.bot.send_message(
                     chat_id=gid,
-                    text=f"Message from {sessions[user_tg_id]}:\n\n{message}"
+                    text=f"📢 Message from {sessions[user_tg_id]}:\n\n{message}"
                 )
                 success += 1
             except Exception as e:
                 fail += 1
+                print(f"Failed to send to {gid}: {e}")
         
-        await update.message.reply_text(f"Sent: {success} | Failed: {fail}")
+        await update.message.reply_text(f"✅ Sent: {success} | ❌ Failed: {fail}")
         
     except Exception as e:
         await update.message.reply_text(f"Error: {str(e)[:100]}")
@@ -240,36 +247,18 @@ user_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text
 def home():
     return "Bot is running!"
 
-@app.route('/health')
-def health():
-    return {"status": "ok"}
-
 def run_flask():
     port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
 
 # ============= MAIN =============
 if __name__ == "__main__":
-    # Start Flask in background thread
+    # Start Flask
     flask_thread = threading.Thread(target=run_flask)
-    flask_thread.daemon = True
     flask_thread.start()
     
-    print("Both bots are starting...")
-    print(f"Admin Bot Token: {ADMIN_BOT_TOKEN[:10]}...")
-    print(f"User Bot Token: {USER_BOT_TOKEN[:10]}...")
+    print("✅ Both bots are starting...")
     
-    # Run both bots with proper event loop
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    
-    async def run_bots():
-        await asyncio.gather(
-            admin_app.run_polling(),
-            user_app.run_polling()
-        )
-    
-    try:
-        loop.run_until_complete(run_bots())
-    except KeyboardInterrupt:
-        print("Bots stopped.")
+    # Run admin bot
+    print("Starting admin bot...")
+    admin_app.run_polling()
