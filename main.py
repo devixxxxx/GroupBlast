@@ -4,18 +4,18 @@ from flask import Flask, request
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 from datetime import datetime
+import threading
 import asyncio
 
-# ---------- CONFIG (Render Environment Variables) ----------
+# ---------- CONFIG ----------
 ADMIN_BOT_TOKEN = os.environ.get("ADMIN_BOT_TOKEN")
 USER_BOT_TOKEN = os.environ.get("USER_BOT_TOKEN")
 ADMIN_USER_ID = os.environ.get("ADMIN_USER_ID")
 
 if not ADMIN_BOT_TOKEN or not USER_BOT_TOKEN or not ADMIN_USER_ID:
-    print("❌ ERROR: Set ADMIN_BOT_TOKEN, USER_BOT_TOKEN, ADMIN_USER_ID in Render")
+    print("ERROR: Set ADMIN_BOT_TOKEN, USER_BOT_TOKEN, ADMIN_USER_ID in Render")
     exit(1)
 
-# JSON file paths
 USERS_FILE = "users.json"
 SESSIONS_FILE = "sessions.json"
 
@@ -58,7 +58,7 @@ async def admin_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("❌ Remove User", callback_data="remove_user")],
         [InlineKeyboardButton("📊 Active Sessions", callback_data="view_sessions")],
     ]
-    await update.message.reply_text("🔐 *Admin Panel*", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    await update.message.reply_text("🔐 Admin Panel", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -72,18 +72,18 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     elif data == "list_users":
         if not users:
-            await query.message.reply_text("📭 No users found.")
+            await query.message.reply_text("No users found.")
         else:
-            msg = "📋 *Registered Users:*\n\n"
+            msg = "Registered Users:\n\n"
             for uid, info in users.items():
-                msg += f"🆔 {uid}\n   📅 Added: {info['added_on']}\n\n"
-            await query.message.reply_text(msg, parse_mode="Markdown")
+                msg += f"ID: {uid}\nAdded: {info['added_on']}\n\n"
+            await query.message.reply_text(msg)
             
     elif data == "remove_user":
         if not users:
             await query.message.reply_text("No users to remove.")
         else:
-            keyboard = [[InlineKeyboardButton(f"❌ {uid}", callback_data=f"remove_{uid}")] for uid in users.keys()]
+            keyboard = [[InlineKeyboardButton(f"Remove {uid}", callback_data=f"remove_{uid}")] for uid in users.keys()]
             await query.message.reply_text("Select user to remove:", reply_markup=InlineKeyboardMarkup(keyboard))
             
     elif data == "view_sessions":
@@ -91,19 +91,17 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not sessions:
             await query.message.reply_text("No active sessions.")
         else:
-            msg = "🟢 *Active Sessions:*\n\n"
+            msg = "Active Sessions:\n\n"
             for tg_id, unique_id in sessions.items():
-                msg += f"📱 User: {tg_id} → Logged in as: {unique_id}\n"
-            await query.message.reply_text(msg, parse_mode="Markdown")
+                msg += f"User: {tg_id} -> Logged in as: {unique_id}\n"
+            await query.message.reply_text(msg)
             
     elif data.startswith("remove_"):
         user_to_remove = data.replace("remove_", "")
         if user_to_remove in users:
             del users[user_to_remove]
             save_users(users)
-            await query.message.reply_text(f"✅ User {user_to_remove} removed!")
-        else:
-            await query.message.reply_text("User not found!")
+            await query.message.reply_text(f"User {user_to_remove} removed!")
 
 async def admin_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.user_data.get('admin_action') == 'add_user':
@@ -111,11 +109,11 @@ async def admin_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         users = load_users()
         
         if user_id in users:
-            await update.message.reply_text("⚠️ User already exists!")
+            await update.message.reply_text("User already exists!")
         else:
             users[user_id] = {"user_id": user_id, "added_on": str(datetime.now())}
             save_users(users)
-            await update.message.reply_text(f"✅ User {user_id} added!")
+            await update.message.reply_text(f"User {user_id} added!")
         
         context.user_data['admin_action'] = None
 
@@ -123,20 +121,19 @@ admin_app.add_handler(CommandHandler("start", admin_start))
 admin_app.add_handler(CallbackQueryHandler(admin_callback))
 admin_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, admin_message))
 
-# ============= USER BOT (No slashes except /start) =============
+# ============= USER BOT =============
 user_app = Application.builder().token(USER_BOT_TOKEN).build()
 
 async def user_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "🔐 *Telegram Auto Message System*\n\n"
-        "📌 *Commands (bina slash):*\n"
+        "Telegram Auto Message System\n\n"
+        "Commands (bina slash):\n"
         "login YOUR_ID - Login to your account\n"
         "logout - Logout\n"
         "broadcast GROUP_ID1,GROUP_ID2 Your message - Send to multiple groups\n"
         "myid - Check login status\n\n"
-        "*Example:*\n"
-        "broadcast -100123456789,-100987654321 Hello!",
-        parse_mode="Markdown"
+        "Example:\n"
+        "broadcast -100123456789,-100987654321 Hello!"
     )
 
 async def user_login(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -145,7 +142,7 @@ async def user_login(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         unique_id = context.args[0]
     except:
-        await update.message.reply_text("❌ Usage: login YOUR_ID")
+        await update.message.reply_text("Usage: login YOUR_ID")
         return
     
     users = load_users()
@@ -154,9 +151,9 @@ async def user_login(update: Update, context: ContextTypes.DEFAULT_TYPE):
         sessions = load_sessions()
         sessions[user_tg_id] = unique_id
         save_sessions(sessions)
-        await update.message.reply_text(f"✅ *Login successful!*\nWelcome {unique_id}", parse_mode="Markdown")
+        await update.message.reply_text(f"Login successful! Welcome {unique_id}")
     else:
-        await update.message.reply_text("❌ *Invalid ID!* Contact admin.", parse_mode="Markdown")
+        await update.message.reply_text("Invalid ID! Contact admin.")
 
 async def user_logout(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_tg_id = str(update.effective_user.id)
@@ -165,25 +162,23 @@ async def user_logout(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_tg_id in sessions:
         del sessions[user_tg_id]
         save_sessions(sessions)
-        await update.message.reply_text("✅ *Logged out!*", parse_mode="Markdown")
-    else:
-        await update.message.reply_text("❌ Not logged in.", parse_mode="Markdown")
+        await update.message.reply_text("Logged out!")
 
 async def user_myid(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_tg_id = str(update.effective_user.id)
     sessions = load_sessions()
     
     if user_tg_id in sessions:
-        await update.message.reply_text(f"✅ Logged in as: {sessions[user_tg_id]}")
+        await update.message.reply_text(f"Logged in as: {sessions[user_tg_id]}")
     else:
-        await update.message.reply_text("❌ Not logged in. Use login")
+        await update.message.reply_text("Not logged in. Use login")
 
 async def user_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_tg_id = str(update.effective_user.id)
     sessions = load_sessions()
     
     if user_tg_id not in sessions:
-        await update.message.reply_text("❌ Please login first!")
+        await update.message.reply_text("Please login first!")
         return
     
     try:
@@ -191,7 +186,7 @@ async def user_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parts = text.split(" ", 2)
         
         if len(parts) < 3:
-            await update.message.reply_text("❌ Usage: broadcast GROUP_ID1,GROUP_ID2 Your message")
+            await update.message.reply_text("Usage: broadcast GROUP_ID1,GROUP_ID2 Your message")
             return
         
         group_part = parts[1]
@@ -205,31 +200,27 @@ async def user_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
             try:
                 await context.bot.send_message(
                     chat_id=gid,
-                    text=f"📢 *From {sessions[user_tg_id]}:*\n\n{message}",
-                    parse_mode="Markdown"
+                    text=f"Message from {sessions[user_tg_id]}:\n\n{message}"
                 )
                 success += 1
             except Exception as e:
                 fail += 1
-                await update.message.reply_text(f"⚠️ Failed to {gid}")
         
-        await update.message.reply_text(f"✅ Sent: {success} | ❌ Failed: {fail}")
+        await update.message.reply_text(f"Sent: {success} | Failed: {fail}")
         
     except Exception as e:
-        await update.message.reply_text(f"⚠️ Error: {str(e)[:100]}")
+        await update.message.reply_text(f"Error: {str(e)[:100]}")
 
-# Message handler for text messages (commands bina slash)
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip().lower()
     
     if text.startswith("login "):
-        # Extract args
         parts = text.split()
         if len(parts) >= 2:
             context.args = [parts[1]]
             await user_login(update, context)
         else:
-            await update.message.reply_text("❌ Usage: login YOUR_ID")
+            await update.message.reply_text("Usage: login YOUR_ID")
     
     elif text == "logout":
         await user_logout(update, context)
@@ -238,25 +229,20 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await user_myid(update, context)
     
     elif text.startswith("broadcast "):
-        # Pass full message
         update.message.text = text
         await user_broadcast(update, context)
-    
-    else:
-        # Ignore unknown messages
-        pass
 
 user_app.add_handler(CommandHandler("start", user_start))
 user_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
-# ============= FLASK (Health Check for Render) =============
+# ============= FLASK =============
 @app.route('/')
 def home():
-    return "🤖 Bot is running!"
+    return "Bot is running!"
 
 @app.route('/health')
 def health():
-    return {"status": "ok", "users": len(load_users()), "sessions": len(load_sessions())}
+    return {"status": "ok"}
 
 def run_flask():
     port = int(os.environ.get("PORT", 5000))
@@ -264,20 +250,26 @@ def run_flask():
 
 # ============= MAIN =============
 if __name__ == "__main__":
-    from threading import Thread
+    # Start Flask in background thread
+    flask_thread = threading.Thread(target=run_flask)
+    flask_thread.daemon = True
+    flask_thread.start()
     
-    # Start Flask in background
-    Thread(target=run_flask).start()
+    print("Both bots are starting...")
+    print(f"Admin Bot Token: {ADMIN_BOT_TOKEN[:10]}...")
+    print(f"User Bot Token: {USER_BOT_TOKEN[:10]}...")
     
-    print("✅ Both bots are starting...")
-    print(f"Admin Bot: {ADMIN_BOT_TOKEN[:15]}...")
-    print(f"User Bot: {USER_BOT_TOKEN[:15]}...")
+    # Run both bots with proper event loop
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     
-    # Run both bots
     async def run_bots():
         await asyncio.gather(
             admin_app.run_polling(),
             user_app.run_polling()
         )
     
-    asyncio.run(run_bots())
+    try:
+        loop.run_until_complete(run_bots())
+    except KeyboardInterrupt:
+        print("Bots stopped.")
